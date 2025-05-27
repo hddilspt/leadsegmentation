@@ -24,18 +24,18 @@ def process_csv_to_xlsx():
         df = pd.read_csv(csv_file)
 
         # Step 2: Check if "Oportunidades[Responsavel]" column exists
-        if "Oportunidades[Responsavel]" not in df.columns:
-            return {"error": "Column 'Oportunidades[Responsavel]' not found."}, 400
+        if "Consultores[Mail]" not in df.columns:
+            return {"error": "Column 'Consultores[Mail]' not found."}, 400
         
         # Step 3: Get unique "Responsavel" values
-        unique_responsaveis = df["Oportunidades[Responsavel]"].dropna().unique()
+        unique_responsaveis = df["Consultores[Mail]"].dropna().unique()
         
         # Step 4: Create an Excel file with multiple sheets
         output = io.BytesIO()
         with pd.ExcelWriter(output, engine='openpyxl') as writer:
             for responsavel in unique_responsaveis:
                 # Filter data per "Responsavel"
-                filtered_data = df[df["Oportunidades[Responsavel]"] == responsavel]
+                filtered_data = df[df["Consultores[Mail]"] == responsavel]
                 if not filtered_data.empty:
                     filtered_data.to_excel(writer, sheet_name=str(responsavel), index=False)
         
