@@ -3,6 +3,7 @@ from flask import Flask, request, send_file
 import pandas as pd
 import io
 import base64
+import zipfile
 
 app = Flask(__name__)
 
@@ -21,7 +22,7 @@ def process_file():
         file_bytes = base64.b64decode(filedata)
         file_stream = io.BytesIO(file_bytes)
 
-        # Choose read method based on extension
+        # Read based on file extension
         if filename.endswith('.csv'):
             df = pd.read_csv(file_stream)
         elif filename.endswith('.xlsx'):
@@ -33,21 +34,32 @@ def process_file():
         if "Consultores[Mail]" not in df.columns:
             return {"error": "Column 'Consultores[Mail]' not found."}, 400
 
-        # Process
         unique_consultores = df["Consultores[Mail]"].dropna().unique()
-        output = io.BytesIO()
-        with pd.ExcelWriter(output, engine='openpyxl') as writer:
+
+        # Create ZIP archive in memory
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
             for consultor in unique_consultores:
-                sheet_name = str(consultor)[:31]
                 filtered = df[df["Consultores[Mail]"] == consultor]
-                filtered.to_excel(writer, sheet_name=sheet_name, index=False)
 
-        output.seek(0)
+                # Create Excel file for each consultor
+                excel_buffer = io.BytesIO()
+                with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+                    filtered.to_excel(writer, index=False)
 
-        return send_file(output,
-                         mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-                         as_attachment=True,
-                         download_name="processed_data.xlsx")
+                excel_buffer.seek(0)
+                # Safe filename: remove problematic characters
+                safe_filename = f"{str(consultor).replace('/', '_')[:50]}.xlsx"
+                zip_file.writestr(safe_filename, excel_buffer.read())
+
+        zip_buffer.seek(0)
+
+        return send_file(
+            zip_buffer,
+            mimetype='application/zip',
+            as_attachment=True,
+            download_name='consultores_files.zip'
+        )
 
     except Exception as e:
         return {"error": str(e)}, 500
