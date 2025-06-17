@@ -14,15 +14,19 @@ def process_file():
 
         filename = data.get("filename")
         filedata = data.get("filedata")
+        segmentation_column = data.get("segmentation_column")
 
         if not filename or not filedata:
             return {"error": "Missing filename or filedata"}, 400
+
+        if not segmentation_column:
+            return {"error": "Missing segmentation_column"}, 400
 
         # Decode base64 to binary
         file_bytes = base64.b64decode(filedata)
         file_stream = io.BytesIO(file_bytes)
 
-        # Read based on file extension
+        # Read file based on extension
         if filename.endswith('.csv'):
             df = pd.read_csv(file_stream)
         elif filename.endswith('.xlsx'):
@@ -30,27 +34,27 @@ def process_file():
         else:
             return {"error": "Unsupported file type"}, 400
 
-        # Check required column
-        if "Consultores[Mail]" not in df.columns:
-            return {"error": "Column 'Consultores[Mail]' not found."}, 400
+        # Validate the segmentation column
+        if segmentation_column not in df.columns:
+            return {"error": f"Column '{segmentation_column}' not found."}, 400
 
-        unique_consultores = df["Consultores[Mail]"].dropna().unique()
+        unique_values = df[segmentation_column].dropna().unique()
 
         # Create ZIP archive in memory
         zip_buffer = io.BytesIO()
         with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for consultor in unique_consultores:
-                filtered = df[df["Consultores[Mail]"] == consultor]
+            for value in unique_values:
+                filtered = df[df[segmentation_column] == value]
 
-                # Create Excel file for each consultor
+                # Create Excel file for each value
                 excel_buffer = io.BytesIO()
                 with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
                     filtered.to_excel(writer, index=False)
 
                 excel_buffer.seek(0)
-                # Safe filename: remove problematic characters
-                safe_filename = f"{str(consultor).replace('/', '_')[:50]}.xlsx"
-                zip_file.writestr(safe_filename, excel_buffer.read())
+                safe_name = str(value).replace('/', '_').replace('@', '_at_')[:50]
+                file_name = f"{safe_name}.xlsx"
+                zip_file.writestr(file_name, excel_buffer.read())
 
         zip_buffer.seek(0)
 
@@ -58,7 +62,7 @@ def process_file():
             zip_buffer,
             mimetype='application/zip',
             as_attachment=True,
-            download_name='consultores_files.zip'
+            download_name='segmented_files.zip'
         )
 
     except Exception as e:
