@@ -4,28 +4,61 @@ import pandas as pd
 import io
 import base64
 import zipfile
+import xml.etree.ElementTree as ET
 import openpyxl
 
 app = Flask(__name__)
 
+def fallback_parse_xlsx(file_stream):
+    """Reads the first worksheet of a broken .xlsx file without relying on styles."""
+    file_stream.seek(0)
+    with zipfile.ZipFile(file_stream) as z:
+        # Load shared strings
+        shared_strings = []
+        if 'xl/sharedStrings.xml' in z.namelist():
+            with z.open('xl/sharedStrings.xml') as s:
+                tree = ET.parse(s)
+                root = tree.getroot()
+                for si in root.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
+                    shared_strings.append(si.text or '')
+
+        # Load the first sheet (assuming it's sheet1.xml)
+        with z.open('xl/worksheets/sheet1.xml') as s:
+            tree = ET.parse(s)
+            root = tree.getroot()
+
+            ns = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
+            rows = []
+            for row in root.findall('.//main:row', ns):
+                values = []
+                for c in row.findall('main:c', ns):
+                    value = ''
+                    cell_type = c.attrib.get('t')
+                    v = c.find('main:v', ns)
+                    if v is not None:
+                        if cell_type == 's':  # shared string
+                            idx = int(v.text)
+                            value = shared_strings[idx] if idx < len(shared_strings) else ''
+                        else:
+                            value = v.text
+                    values.append(value)
+                rows.append(values)
+
+    if not rows:
+        raise ValueError("No data found in Excel sheet.")
+    return pd.DataFrame(rows[1:], columns=rows[0])
+
+
 def robust_read_excel(file_stream):
-    """Attempt to read an Excel file, falling back to a raw parser if styles are corrupted."""
+    """Safely read Excel files with fallback if styles cause a crash."""
     try:
         return pd.read_excel(file_stream, engine='openpyxl')
     except IndexError as e:
         if 'list index out of range' in str(e):
-            # Fall back to raw read
-            try:
-                file_stream.seek(0)
-                wb = openpyxl.load_workbook(file_stream, read_only=True, data_only=True)
-                sheet = wb.active
-                data = [[cell.value for cell in row] for row in sheet.iter_rows()]
-                df = pd.DataFrame(data[1:], columns=data[0])
-                return df
-            except Exception as fallback_error:
-                raise ValueError(f"Excel fallback read failed: {fallback_error}")
+            return fallback_parse_xlsx(file_stream)
         else:
             raise
+
 
 @app.route('/process', methods=['POST'])
 def process_file():
