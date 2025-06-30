@@ -13,21 +13,49 @@ def fallback_parse_xlsx(file_stream):
     """Reads the first worksheet of a broken .xlsx file without relying on styles."""
     file_stream.seek(0)
     with zipfile.ZipFile(file_stream) as z:
+        ns = {
+            'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main',
+            'r': 'http://schemas.openxmlformats.org/officeDocument/2006/relationships'
+        }
+
         # Load shared strings
         shared_strings = []
         if 'xl/sharedStrings.xml' in z.namelist():
             with z.open('xl/sharedStrings.xml') as s:
                 tree = ET.parse(s)
                 root = tree.getroot()
-                for si in root.findall('.//{http://schemas.openxmlformats.org/spreadsheetml/2006/main}t'):
+                for si in root.findall('.//main:t', ns):
                     shared_strings.append(si.text or '')
 
-        # Load the first sheet (assuming it's sheet1.xml)
-        with z.open('xl/worksheets/sheet1.xml') as s:
+        # Get first sheet's rel ID from workbook.xml
+        with z.open('xl/workbook.xml') as f:
+            tree = ET.parse(f)
+            root = tree.getroot()
+            sheet_elem = root.find('.//main:sheets/main:sheet', ns)
+            if sheet_elem is None:
+                raise ValueError("No sheets found in workbook.")
+            rel_id = sheet_elem.attrib.get(f'{{{ns["r"]}}}id')
+
+        # Map rel ID to actual file in workbook.xml.rels
+        rel_target = None
+        with z.open('xl/_rels/workbook.xml.rels') as f:
+            tree = ET.parse(f)
+            root = tree.getroot()
+            for rel in root.findall('main:Relationship', {'main': ns['r']}):
+                if rel.attrib.get('Id') == rel_id:
+                    rel_target = rel.attrib.get('Target')
+                    break
+
+        if not rel_target:
+            raise ValueError("Could not find worksheet target from rels.")
+
+        # Normalize path
+        sheet_path = f"xl/{rel_target}".replace("\\", "/")
+
+        # Parse the actual worksheet
+        with z.open(sheet_path) as s:
             tree = ET.parse(s)
             root = tree.getroot()
-
-            ns = {'main': 'http://schemas.openxmlformats.org/spreadsheetml/2006/main'}
             rows = []
             for row in root.findall('.//main:row', ns):
                 values = []
@@ -36,7 +64,7 @@ def fallback_parse_xlsx(file_stream):
                     cell_type = c.attrib.get('t')
                     v = c.find('main:v', ns)
                     if v is not None:
-                        if cell_type == 's':  # shared string
+                        if cell_type == 's':
                             idx = int(v.text)
                             value = shared_strings[idx] if idx < len(shared_strings) else ''
                         else:
@@ -120,6 +148,7 @@ def process_file():
 
     except Exception as e:
         return {"error": str(e)}, 500
+
 
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
