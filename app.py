@@ -27,7 +27,7 @@ def fallback_parse_xlsx(file_stream):
                 for si in root.findall('.//main:t', ns):
                     shared_strings.append(si.text or '')
 
-        # Get first sheet's rel ID from workbook.xml
+        # Get rel ID of first sheet from workbook.xml
         with z.open('xl/workbook.xml') as f:
             tree = ET.parse(f)
             root = tree.getroot()
@@ -36,7 +36,7 @@ def fallback_parse_xlsx(file_stream):
                 raise ValueError("No sheets found in workbook.")
             rel_id = sheet_elem.attrib.get(f'{{{ns["r"]}}}id')
 
-        # Map rel ID to actual file in workbook.xml.rels
+        # Resolve rel ID to the actual sheet file from workbook.xml.rels
         rel_target = None
         with z.open('xl/_rels/workbook.xml.rels') as f:
             tree = ET.parse(f)
@@ -49,10 +49,13 @@ def fallback_parse_xlsx(file_stream):
         if not rel_target:
             raise ValueError("Could not find worksheet target from rels.")
 
-        # Normalize path
-        sheet_path = f"xl/{rel_target}".replace("\\", "/")
+        # Normalize relative path
+        if rel_target.startswith('/'):
+            sheet_path = rel_target[1:]
+        else:
+            sheet_path = os.path.normpath(f"xl/{rel_target}").replace("\\", "/")
 
-        # Parse the actual worksheet
+        # Parse worksheet XML
         with z.open(sheet_path) as s:
             tree = ET.parse(s)
             root = tree.getroot()
