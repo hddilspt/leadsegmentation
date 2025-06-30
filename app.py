@@ -36,26 +36,26 @@ def fallback_parse_xlsx(file_stream):
                 raise ValueError("No sheets found in workbook.")
             rel_id = sheet_elem.attrib.get(f'{{{ns["r"]}}}id')
 
-        # Resolve rel ID to the actual sheet file from workbook.xml.rels
+        # Parse workbook.xml.rels WITHOUT namespaces
         rel_target = None
         with z.open('xl/_rels/workbook.xml.rels') as f:
             tree = ET.parse(f)
             root = tree.getroot()
-            for rel in root.findall('main:Relationship', {'main': ns['r']}):
+            for rel in root.findall('Relationship'):
                 if rel.attrib.get('Id') == rel_id:
                     rel_target = rel.attrib.get('Target')
                     break
 
         if not rel_target:
-            raise ValueError("Could not find worksheet target from rels.")
+            raise ValueError(f"Could not find worksheet target from rels (rel_id: {rel_id}).")
 
-        # Normalize relative path
+        # Normalize and clean path
         if rel_target.startswith('/'):
             sheet_path = rel_target[1:]
         else:
             sheet_path = os.path.normpath(f"xl/{rel_target}").replace("\\", "/")
 
-        # Parse worksheet XML
+        # Read and parse worksheet
         with z.open(sheet_path) as s:
             tree = ET.parse(s)
             root = tree.getroot()
