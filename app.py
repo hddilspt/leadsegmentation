@@ -4,8 +4,28 @@ import pandas as pd
 import io
 import base64
 import zipfile
+import openpyxl
 
 app = Flask(__name__)
+
+def robust_read_excel(file_stream):
+    """Attempt to read an Excel file, falling back to a raw parser if styles are corrupted."""
+    try:
+        return pd.read_excel(file_stream, engine='openpyxl')
+    except IndexError as e:
+        if 'list index out of range' in str(e):
+            # Fall back to raw read
+            try:
+                file_stream.seek(0)
+                wb = openpyxl.load_workbook(file_stream, read_only=True, data_only=True)
+                sheet = wb.active
+                data = [[cell.value for cell in row] for row in sheet.iter_rows()]
+                df = pd.DataFrame(data[1:], columns=data[0])
+                return df
+            except Exception as fallback_error:
+                raise ValueError(f"Excel fallback read failed: {fallback_error}")
+        else:
+            raise
 
 @app.route('/process', methods=['POST'])
 def process_file():
@@ -30,7 +50,7 @@ def process_file():
         if filename.endswith('.csv'):
             df = pd.read_csv(file_stream)
         elif filename.endswith('.xlsx'):
-            df = pd.read_excel(file_stream, engine='openpyxl')
+            df = robust_read_excel(file_stream)
         else:
             return {"error": "Unsupported file type"}, 400
 
